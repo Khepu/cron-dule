@@ -57,67 +57,52 @@
 
     ;; just a number
     :else
-    (let [number (if (Character/isDigit (first fragment))
+    (let [number (if (Character/isDigit (.charAt fragment 0))
                    (Integer/parseInt fragment)
                    (get translator fragment))]
       (if (<= min number max)
         number
         (throw "Invalid value!")))))
 
-(defn compact [^BitSet bitset value]
-  (if (vector? value)
-    (.set bitset (first value) (inc (second value)))
-    (.set bitset value))
-  bitset)
-
-(defn parse-seconds [^String expression]
-  (->> (string/split expression #",")
-       (map #(-parse-fragment % 0 59 {}))
-       (reduce compact (new BitSet 60))))
-
-(defn parse-hours [^String expression]
-  (->> (string/split expression #",")
-       (map #(-parse-fragment % 0 23 {}))
-       (reduce compact (new BitSet 24))))
-
-(defn parse-days [^String expression]
-  (->> (string/split expression #",")
-       (map #(-parse-fragment % 1 31 {}))
-       ;; here, and in other places, we waste 1 bit for convenience
-       (reduce compact (new BitSet 32))))
+(defn compact
+  ([^BitSet bitset value]
+   (if (vector? value)
+     (.set bitset (first value) (inc (second value)))
+     (.set bitset value))
+   bitset)
+  ([^BitSet bitset] bitset))
 
 (def months-translator
-  {"jan" 1
-   "feb" 2
-   "mar" 3
-   "apr" 4
-   "may" 5
-   "jun" 6
-   "jul" 7
-   "aug" 8
-   "sep" 9
-   "oct" 10
-   "nov" 11
-   "dec" 12})
-
-(defn parse-months [^String expression]
-  (->> (string/split expression #",")
-       (map #(-parse-fragment % 1 12 months-translator))
-       (reduce compact (new BitSet 13))))
+  {"jan"  1 "feb"  2 "mar"  3
+   "apr"  4 "may"  5 "jun"  6
+   "jul"  7 "aug"  8 "sep"  9
+   "oct" 10 "nov" 11 "dec" 12})
 
 (def weekdays-translator
-  {"sun" 0
-   "mon" 1
-   "tue" 2
-   "wed" 3
-   "thu" 4
-   "fri" 5
-   "sat" 6})
+  {"sun" 0 "mon" 1 "tue" 2 "wed" 3 "thu" 4 "fri" 5 "sat" 6})
+
+(defmacro parser [[^long min ^long max] expression translator]
+  `(transduce
+    (map #(-parse-fragment % ~min ~max ~translator))
+    compact
+    ;; here, and in other places, we waste 1 bit for convenience
+    (new BitSet ~(inc max))
+    (string/split ~expression #",")))
+
+(defn parse-seconds [^String expression]
+  (parser [0 59] expression {}))
+
+(defn parse-hours [^String expression]
+  (parser [0 23] expression {}))
+
+(defn parse-days [^String expression]
+  (parser [1 31] expression {}))
+
+(defn parse-months [^String expression]
+  (parser [1 12] expression months-translator))
 
 (defn parse-weekdays [^String expression]
-  (->> (string/split expression #",")
-       (map #(-parse-fragment % 0 6 weekdays-translator))
-       (reduce compact (new BitSet 7))))
+  (parser [0 6] expression weekdays-translator))
 
 (defn parse [cron-string]
   (let [segments (string/split cron-string #" ")]
