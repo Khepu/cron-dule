@@ -7,12 +7,12 @@
    [java.util BitSet]))
 
 (defrecord Cron
-    [seconds
-     minutes
-     hours
-     days
-     months
-     weekdays])
+    [^BitSet seconds
+     ^BitSet minutes
+     ^BitSet hours
+     ^BitSet days
+     ^BitSet months
+     ^BitSet weekdays])
 
 (defn parse-range [range-str]
   (let [components (string/split range-str #"-")]
@@ -33,7 +33,7 @@
         [start end]))))
 
 (defn -parse-fragment
-  "Returns one of: `:*`, a hash-set of integers, or a number. `min` and `max` are inclusive."
+  "Returns either a [start end] vector or an integer. `min` and `max` are inclusive."
   [^String fragment min max translator]
   (cond
     ;; if it's a wildcard then we don't need care about the rest of the
@@ -65,7 +65,6 @@
         (throw "Invalid value!")))))
 
 (defn compact [^BitSet bitset value]
-  ;; TODO: Replace hash-set with BitSet
   (if (vector? value)
     (.set bitset (first value) (inc (second value)))
     (.set bitset value))
