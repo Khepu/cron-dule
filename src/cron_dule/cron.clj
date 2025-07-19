@@ -101,6 +101,9 @@
 (defn parse-seconds [^String expression]
   (parser [0 59] expression {}))
 
+(defn parse-minutes [^String expression]
+  (parser [0 59] expression {}))
+
 (defn parse-hours [^String expression]
   (parser [0 23] expression {}))
 
@@ -118,7 +121,7 @@
     (if (= 6 (count segments))
       (let [[seconds minutes hours days months weekdays] segments]
         (Cron. (parse-seconds seconds)
-               (parse-seconds minutes)
+               (parse-minutes minutes)
                (parse-hours hours)
                (parse-days days)
                (parse-months months)
