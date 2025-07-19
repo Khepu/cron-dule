@@ -14,27 +14,32 @@
      ^BitSet months
      ^BitSet weekdays])
 
-(defn parse-range [range-str]
-  (let [components (string/split range-str #"-")]
-    (when (= 2 (count components))
-      (let [[start end] components
-            start (Integer/parseInt start)
-            end   (Integer/parseInt end)]
-        [start end]))))
-
-(defn parse-named-range
+(defn parse-range
   "Returns numeric [start end] tuple, assumes input is normalized to lowercase."
-  [named-range translator]
-  (let [components (string/split named-range #"-")]
-    (when (= 2 (count components))
-      (let [[start end] components
-            start (get translator start)
-            end (get translator end)]
-        [start end]))))
+  ([^String range-str]
+   (let [components (string/split range-str #"-")]
+     (when (= 2 (count components))
+       (let [[start end] components]
+         [(Integer/parseInt start)
+          (Integer/parseInt end)]))))
+
+  ([^String named-range translator]
+   (let [components (string/split named-range #"-")]
+     (when (= 2 (count components))
+       (let [[start end] components
+             start (get translator start)
+             end (get translator end)]
+         (when-not start
+           (throw (ex-info "No translation found for range start!"
+                           {:range named-range :value [start end]})))
+         (when-not end
+           (throw (ex-info "No translation found for range end!"
+                           {:range named-range :value [start end]})))
+         [start end])))))
 
 (defn -parse-fragment
   "Returns either a [start end] vector or an integer. `min` and `max` are inclusive."
-  [^String fragment min max translator]
+  [^String fragment ^long min ^long max translator]
   (cond
     ;; if it's a wildcard then we don't need care about the rest of the
     ;; results but we do care about correctness!
@@ -45,26 +50,30 @@
     ;; 2. parse components
     ;; 3. expand to values
     (string/index-of fragment \-)
-    (if-let [[start end] (if (Character/isDigit (first fragment))
+    (if-let [[start end] (if (Character/isDigit (.charAt fragment 0))
                            (parse-range fragment)
-                           (parse-named-range fragment translator))]
+                           (parse-range fragment translator))]
       (if (and (not (= start end))
                (<= min start end max))
         [start end]
-        (throw "Bad range!"))
+        (throw (ex-info "Bad range!" {:fragment fragment
+                                      :parsed [start end]})))
       ;; if there are more then it's invalid
-      (throw "Found incomprehensible range!"))
+      (throw (ex-info "Incomprehensible range!" {:fragment fragment})))
 
     ;; just a number
     :else
     (let [number (if (Character/isDigit (.charAt fragment 0))
                    (Integer/parseInt fragment)
                    (get translator fragment))]
-      (if (<= min number max)
+      (if (and number (<= min number max))
         number
-        (throw "Invalid value!")))))
+        (throw (ex-info "Invalid value!" {:fragment fragment
+                                          :parsed number}))))))
 
 (defn compact
+  "Applies `value` (an integer or a vector of [start end]) to bitset and returns
+  it. The single parameter implementation is required for transducers."
   ([^BitSet bitset value]
    (if (vector? value)
      (.set bitset (first value) (inc (second value)))
@@ -105,15 +114,18 @@
   (parser [0 6] expression weekdays-translator))
 
 (defn parse [cron-string]
-  (let [segments (string/split cron-string #" ")]
-    (when (= 6 (count segments))
+  (let [segments (string/split (string/lower-case cron-string) #" ")]
+    (if (= 6 (count segments))
       (let [[seconds minutes hours days months weekdays] segments]
         (Cron. (parse-seconds seconds)
                (parse-seconds minutes)
                (parse-hours hours)
                (parse-days days)
                (parse-months months)
-               (parse-weekdays weekdays))))))
+               (parse-weekdays weekdays)))
+      (throw (ex-info "Invalid number of segments!"
+                      {:expression cron-string
+                       :segments segments})))))
 
 ;;
 ;; DB
