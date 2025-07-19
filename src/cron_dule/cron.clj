@@ -31,10 +31,10 @@
              end (get translator end)]
          (when-not start
            (throw (ex-info "No translation found for range start!"
-                           {:range named-range :value [start end]})))
+                           {:fragment named-range :value [start end]})))
          (when-not end
            (throw (ex-info "No translation found for range end!"
-                           {:range named-range :value [start end]})))
+                           {:fragment named-range :value [start end]})))
          [start end])))))
 
 (defn -parse-fragment
