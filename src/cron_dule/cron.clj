@@ -1,9 +1,10 @@
 (ns cron-dule.cron
   (:require
    [clojure.string :as string]
-   [clojure.set :as set]
    [next.jdbc :as jdbc]
-   [cron-dule.database :as db]))
+   [cron-dule.database :as db])
+  (:import
+   [java.util BitSet]))
 
 (defrecord Cron
     [seconds
@@ -31,38 +32,13 @@
             end (get translator end)]
         [start end]))))
 
-(defn -parse-numeric
+(defn -parse-fragment
   "Returns one of: `:*`, a hash-set of integers, or a number. `min` and `max` are inclusive."
-  [^String fragment min max]
-  (cond
-    ;; if it's a wildcard then we don't need care about the rest of the
-    ;; results but we do care about correctness!
-    (= fragment "*") :*
-    ;; this is a range. We need to:
-    ;; 1. split the range
-    ;; 2. parse components
-    ;; 3. expand to values
-    (string/index-of fragment \-)
-    (if-let [[start end] (parse-range fragment)]
-      (if (and (not (= start end))
-               (<= min start end max))
-        (into #{} (range start (inc end)))
-        (throw "Bad range!"))
-      ;; if there are more then it's invalid
-      (throw "Found incomprehensible range!"))
-    ;; just a number
-    :else
-    (let [number (Integer/parseInt fragment)]
-      (if (<= min number max)
-        number
-        (throw "Invalid value")))))
-
-(defn -parse-named
   [^String fragment min max translator]
   (cond
     ;; if it's a wildcard then we don't need care about the rest of the
     ;; results but we do care about correctness!
-    (= fragment "*") :*
+    (= fragment "*") [min max]
 
     ;; this is a range. We need to:
     ;; 1. split the range
@@ -74,7 +50,7 @@
                            (parse-named-range fragment translator))]
       (if (and (not (= start end))
                (<= min start end max))
-        (into #{} (range start (inc end)))
+        [start end]
         (throw "Bad range!"))
       ;; if there are more then it's invalid
       (throw "Found incomprehensible range!"))
@@ -86,37 +62,30 @@
                    (get translator fragment))]
       (if (<= min number max)
         number
-        (throw "Invalid value for seconds")))))
+        (throw "Invalid value!")))))
 
-(defn compact [values value]
+(defn compact [^BitSet bitset value]
   ;; TODO: Replace hash-set with BitSet
-  (if (set? value)
-    (set/union values value)
-    (conj values value)))
-
-(defn compact-all [max values]
-  (if (or (contains? values :*)
-          (= max (count values)))
-    :*
-    values))
+  (if (vector? value)
+    (.set bitset (first value) (inc (second value)))
+    (.set bitset value))
+  bitset)
 
 (defn parse-seconds [^String expression]
   (->> (string/split expression #",")
-       (map #(-parse-numeric % 0 59))
-       (reduce compact #{})
-       (compact-all 60)))
+       (map #(-parse-fragment % 0 59 {}))
+       (reduce compact (new BitSet 60))))
 
 (defn parse-hours [^String expression]
   (->> (string/split expression #",")
-       (map #(-parse-numeric % 0 23))
-       (reduce compact #{})
-       (compact-all 24)))
+       (map #(-parse-fragment % 0 23 {}))
+       (reduce compact (new BitSet 24))))
 
 (defn parse-days [^String expression]
   (->> (string/split expression #",")
-       (map #(-parse-numeric % 1 31))
-       (reduce compact #{})
-       (compact-all 31)))
+       (map #(-parse-fragment % 1 31 {}))
+       ;; here, and in other places, we waste 1 bit for convenience
+       (reduce compact (new BitSet 32))))
 
 (def months-translator
   {"jan" 1
@@ -134,9 +103,8 @@
 
 (defn parse-months [^String expression]
   (->> (string/split expression #",")
-       (map #(-parse-named % 1 12 months-translator))
-       (reduce compact #{})
-       (compact-all 12)))
+       (map #(-parse-fragment % 1 12 months-translator))
+       (reduce compact (new BitSet 13))))
 
 (def weekdays-translator
   {"sun" 0
@@ -149,9 +117,8 @@
 
 (defn parse-weekdays [^String expression]
   (->> (string/split expression #",")
-       (map #(-parse-named % 0 6 weekdays-translator))
-       (reduce compact #{})
-       (compact-all 7)))
+       (map #(-parse-fragment % 0 6 weekdays-translator))
+       (reduce compact (new BitSet 7))))
 
 (defn parse [cron-string]
   (let [segments (string/split cron-string #" ")]
