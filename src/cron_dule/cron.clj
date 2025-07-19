@@ -37,7 +37,7 @@
                            {:fragment named-range :value [start end]})))
          [start end])))))
 
-(defn -parse-fragment
+(defn parse-fragment
   "Returns either a [start end] vector or an integer. `min` and `max` are inclusive."
   [^String fragment ^long min ^long max translator]
   (cond
@@ -90,31 +90,31 @@
 (def weekdays-translator
   {"sun" 0 "mon" 1 "tue" 2 "wed" 3 "thu" 4 "fri" 5 "sat" 6})
 
-(defmacro parser [[^long min ^long max] expression translator]
+(defmacro parse [[^long min ^long max] expression translator]
   `(transduce
-    (map #(-parse-fragment % ~min ~max ~translator))
+    (map #(parse-fragment % ~min ~max ~translator))
     compact
-    ;; here, and in other places, we waste 1 bit for convenience
+    ;; for some cases we waste 1 bit for convenience
     (new BitSet ~(inc max))
     (string/split ~expression #",")))
 
 (defn parse-seconds [^String expression]
-  (parser [0 59] expression {}))
+  (parse [0 59] expression {}))
 
 (defn parse-minutes [^String expression]
-  (parser [0 59] expression {}))
+  (parse [0 59] expression {}))
 
 (defn parse-hours [^String expression]
-  (parser [0 23] expression {}))
+  (parse [0 23] expression {}))
 
 (defn parse-days [^String expression]
-  (parser [1 31] expression {}))
+  (parse [1 31] expression {}))
 
 (defn parse-months [^String expression]
-  (parser [1 12] expression months-translator))
+  (parse [1 12] expression months-translator))
 
 (defn parse-weekdays [^String expression]
-  (parser [0 6] expression weekdays-translator))
+  (parse [0 6] expression weekdays-translator))
 
 (defn parse [cron-string]
   (let [segments (string/split (string/lower-case cron-string) #" ")]
