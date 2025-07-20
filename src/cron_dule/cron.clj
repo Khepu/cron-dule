@@ -7,6 +7,8 @@
    [java.util BitSet]
    [java.time LocalDateTime ZoneId DayOfWeek Year]))
 
+(set! *warn-on-reflection* true)
+
 (defrecord Cron
     [^BitSet seconds
      ^BitSet minutes
@@ -77,7 +79,8 @@
   it. The single parameter implementation is required for transducers."
   ([^BitSet bitset value]
    (if (vector? value)
-     (.set bitset (first value) (inc (second value)))
+     (let [[^long a ^long b] value]
+       (.set bitset a (inc b)))
      (.set bitset value))
    bitset)
   ([^BitSet bitset] bitset))
@@ -117,7 +120,8 @@
 (defn parse-weekdays [^String expression]
   (parse [0 6] expression weekdays-translator))
 
-(defn parse-cron [cron-string]
+(defn parse-cron
+  ^Cron [^String cron-string]
   (let [segments (string/split (string/lower-case cron-string) #" ")]
     (if (= 6 (count segments))
       (let [[seconds minutes hours days months weekdays] segments]
@@ -131,7 +135,7 @@
                       {:expression cron-string
                        :segments segments})))))
 
-(def zone (ZoneId/of "UTC"))
+(def ^ZoneId zone (ZoneId/of "UTC"))
 
 (defn utc-now
   ^LocalDateTime []
@@ -159,7 +163,8 @@
         month (.getMonth local-date-time)]
     (.length month (.isLeap year-obj))))
 
-(defn next-execution [^Cron cron]
+(defn next-execution
+  ^LocalDateTime [^Cron cron]
   (let [now (utc-now)
         current-year (.getYear now)]
     (loop [exec-time now]
@@ -213,12 +218,14 @@
             next-exec-time (if (zero? dist-weekday)
                              next-exec-time
                              (.plusDays next-exec-time dist-weekday))]
-        ;; if we made no changes then we are done
+        ;; Set am arbitrary stoping poing in case we hit a case
+        ;; that doesn't exit like Febraury 30th
         (when (> (.getYear next-exec-time) (+ current-year 400))
           (throw (ex-info "Invalid cron expression" {:day day
                                                      :next-day next-day
                                                      :dist-day dist-day
                                                      :dist-month dist-month})))
+        ;; if we made no changes then we are done
         (if (identical? exec-time next-exec-time)
           next-exec-time
           (recur next-exec-time))))))
