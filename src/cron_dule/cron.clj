@@ -4,7 +4,8 @@
    [next.jdbc :as jdbc]
    [cron-dule.database :as db])
   (:import
-   [java.util BitSet]))
+   [java.util BitSet]
+   [java.time LocalDateTime ZoneId DayOfWeek Year]))
 
 (defrecord Cron
     [^BitSet seconds
@@ -116,7 +117,7 @@
 (defn parse-weekdays [^String expression]
   (parse [0 6] expression weekdays-translator))
 
-(defn parse [cron-string]
+(defn parse-cron [cron-string]
   (let [segments (string/split (string/lower-case cron-string) #" ")]
     (if (= 6 (count segments))
       (let [[seconds minutes hours days months weekdays] segments]
@@ -129,6 +130,98 @@
       (throw (ex-info "Invalid number of segments!"
                       {:expression cron-string
                        :segments segments})))))
+
+(def zone (ZoneId/of "UTC"))
+
+(defn utc-now
+  ^LocalDateTime []
+  (LocalDateTime/now zone))
+
+(def day-of-week
+  {DayOfWeek/SUNDAY    0
+   DayOfWeek/MONDAY    1
+   DayOfWeek/TUESDAY   2
+   DayOfWeek/WEDNESDAY 3
+   DayOfWeek/THURSDAY  4
+   DayOfWeek/FRIDAY    5
+   DayOfWeek/SATURDAY  6})
+
+(defn next-slot [^BitSet bitset current-value]
+  (let [next-value (.nextSetBit bitset current-value)]
+    (if (<= 0 next-value)
+      next-value
+      (.nextSetBit bitset 0))))
+
+(defn days-in-month
+  ^long [^LocalDateTime local-date-time]
+  (let [year (.getYear local-date-time)
+        year-obj (Year/of year)
+        month (.getMonth local-date-time)]
+    (.length month (.isLeap year-obj))))
+
+(defn next-execution [^Cron cron]
+  (let [now (utc-now)
+        current-year (.getYear now)]
+    (loop [exec-time now]
+      (let [seconds (.getSecond exec-time)
+            next-seconds (next-slot (:seconds cron) seconds)
+            dist-seconds (if (< next-seconds seconds)
+                           (- (+ 60 next-seconds) seconds)
+                           (- next-seconds seconds))
+            next-exec-time (if (zero? dist-seconds)
+                             exec-time
+                             (.plusSeconds exec-time dist-seconds))
+            minutes (.getMinute next-exec-time)
+            next-minutes (next-slot (:minutes cron) minutes)
+            dist-minutes (if (< next-minutes minutes)
+                           (- (+ 60 next-minutes) minutes)
+                           (- next-minutes minutes))
+            next-exec-time (if (zero? dist-seconds)
+                             next-exec-time
+                             (.plusMinutes next-exec-time dist-minutes))
+            hour (.getHour next-exec-time)
+            next-hour (next-slot (:hours cron) hour)
+            dist-hour (if (< next-hour hour)
+                        (- (+ 24 next-hour) hour)
+                        (- next-hour hour))
+            next-exec-time (if (zero? dist-hour)
+                             next-exec-time
+                             (.plusHours next-exec-time dist-hour))
+            day (.getDayOfMonth next-exec-time)
+            next-day (next-slot (:days cron) day)
+            dist-day (if (< next-day day)
+                       (- (+ (days-in-month next-exec-time) next-day) day)
+                       (- next-day day))
+            next-exec-time (if (zero? dist-day)
+                             next-exec-time
+                             (.plusDays next-exec-time dist-day))
+            month (.getMonthValue next-exec-time)
+            next-month (next-slot (:months cron) month)
+            dist-month (if (< next-month month)
+                         (- (+ 12 next-month) month)
+                         (- next-month month))
+            next-exec-time (if (zero? dist-month)
+                             next-exec-time
+                             (.plusMonths next-exec-time dist-month))
+            ;; If we are not on the right weekday, then all we want to do is
+            ;; jiggle things to the right weekday and the rest will converge
+            weekday (get day-of-week (.getDayOfWeek next-exec-time))
+            next-weekday (next-slot (:weekdays cron) weekday)
+            dist-weekday (if (< next-weekday weekday)
+                           (- (+ 7 next-weekday) weekday)
+                           (- next-weekday weekday))
+            next-exec-time (if (zero? dist-weekday)
+                             next-exec-time
+                             (.plusDays next-exec-time dist-weekday))]
+        ;; if we made no changes then we are done
+        (when (> (.getYear next-exec-time) (+ current-year 400))
+          (throw (ex-info "Invalid cron expression" {:day day
+                                                     :next-day next-day
+                                                     :dist-day dist-day
+                                                     :dist-month dist-month})))
+        (if (identical? exec-time next-exec-time)
+          next-exec-time
+          (recur next-exec-time))))))
 
 ;;
 ;; DB
