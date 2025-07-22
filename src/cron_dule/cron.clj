@@ -139,22 +139,22 @@
     (new BitSet ~(inc max))
     (string/split ~expression #",")))
 
-(defn parse-seconds [^String expression]
+(defn parse-seconds ^BitSet [^String expression]
   (parse [0 59] expression {}))
 
-(defn parse-minutes [^String expression]
+(defn parse-minutes ^BitSet [^String expression]
   (parse [0 59] expression {}))
 
-(defn parse-hours [^String expression]
+(defn parse-hours ^BitSet [^String expression]
   (parse [0 23] expression {}))
 
-(defn parse-days [^String expression]
+(defn parse-days ^BitSet [^String expression]
   (parse [1 31] expression {}))
 
-(defn parse-months [^String expression]
+(defn parse-months ^BitSet [^String expression]
   (parse [1 12] expression months-translator))
 
-(defn parse-weekdays [^String expression]
+(defn parse-weekdays ^BitSet [^String expression]
   (parse [0 6] expression weekdays-translator))
 
 (defn parse-cron
