@@ -5,7 +5,8 @@
    [cron-dule.database :as db])
   (:import
    [java.util BitSet]
-   [java.time LocalDateTime ZoneId DayOfWeek Year]))
+   [java.time LocalDateTime ZoneId DayOfWeek Year]
+   [clojure.lang PersistentVector LongRange]))
 
 (set! *warn-on-reflection* true)
 
@@ -17,28 +18,47 @@
      ^BitSet months
      ^BitSet weekdays])
 
+
 (defn parse-range
   "Returns numeric [start end] tuple, assumes input is normalized to lowercase."
-  ([^String range-str]
-   (let [components (string/split range-str #"-")]
-     (when (= 2 (count components))
-       (let [[start end] components]
-         [(Integer/parseInt start)
-          (Integer/parseInt end)]))))
+  [^String range-expr translator]
+  (let [components (string/split range-expr #"-")]
+    (when (= 2 (count components))
+      (let [[^String start ^String end] components
+            start (if (Character/isDigit (.charAt start 0))
+                    (Integer/parseInt start)
+                    (get translator start))
+            end (if (Character/isDigit (.charAt end 0))
+                  (Integer/parseInt end)
+                  (get translator end))
+            start-end [start end]]
+        (when-not start
+          (throw (ex-info "No translation found for range start!"
+                          {:fragment range-expr :value start-end})))
+        (when-not end
+          (throw (ex-info "No translation found for range end!"
+                          {:fragment range-expr :value start-end})))
+        start-end))))
 
-  ([^String named-range translator]
-   (let [components (string/split named-range #"-")]
-     (when (= 2 (count components))
-       (let [[start end] components
-             start (get translator start)
-             end (get translator end)]
-         (when-not start
-           (throw (ex-info "No translation found for range start!"
-                           {:fragment named-range :value [start end]})))
-         (when-not end
-           (throw (ex-info "No translation found for range end!"
-                           {:fragment named-range :value [start end]})))
-         [start end])))))
+(defn parse-step
+  [^String step-expr translator]
+  (let [components (string/split step-expr #"/")]
+    (when (= 2 (count components))
+      (let [[^String start ^String step] components
+            start (if (Character/isDigit (.charAt start 0))
+                    (Integer/parseInt start)
+                    (if (= start "*")
+                      0
+                      (get translator start)))
+            step (Integer/parseInt step)
+            start-step [start step]]
+        (when-not start
+          (throw (ex-info "No translation found for step start!"
+                          {:fragment step-expr :value start-step})))
+        (when-not step
+          (throw (ex-info "No translation found for step end!"
+                          {:fragment step-expr :value start-step})))
+        start-step))))
 
 (defn parse-fragment
   "Returns either a [start end] vector or an integer. `min` and `max` are inclusive."
@@ -53,16 +73,26 @@
     ;; 2. parse components
     ;; 3. expand to values
     (string/index-of fragment \-)
-    (if-let [[start end] (if (Character/isDigit (.charAt fragment 0))
-                           (parse-range fragment)
-                           (parse-range fragment translator))]
+    (if-let [[start end] (parse-range fragment translator)]
       (if (and (not (= start end))
                (<= min start end max))
         [start end]
-        (throw (ex-info "Bad range!" {:fragment fragment
-                                      :parsed [start end]})))
+        (throw (ex-info "Bad range!"
+                        {:fragment fragment :parsed [start end]})))
       ;; if there are more then it's invalid
-      (throw (ex-info "Incomprehensible range!" {:fragment fragment})))
+      (throw (ex-info "Incomprehensible range!"
+                      {:fragment fragment})))
+
+    ;; this is a step expression. Similar to range.
+    (string/index-of fragment \/)
+    (if-let [[start step] (parse-step fragment translator)]
+      (if (and (pos? step)
+               (<= min start max))
+        (range start (inc max) step)
+        (throw (ex-info "Bad step!"
+                        {:fragment fragment :parsed [start step]})))
+      ;; if there are more then it's invalid
+      (throw (ex-info "Incomprehensible step!" {:fragment fragment})))
 
     ;; just a number
     :else
@@ -71,16 +101,23 @@
                    (get translator fragment))]
       (if (and number (<= min number max))
         number
-        (throw (ex-info "Invalid value!" {:fragment fragment
-                                          :parsed number}))))))
+        (throw (ex-info "Invalid value!"
+                        {:fragment fragment :parsed number}))))))
 
 (defn compact
   "Applies `value` (an integer or a vector of [start end]) to bitset and returns
   it. The single parameter implementation is required for transducers."
   ([^BitSet bitset value]
-   (if (vector? value)
+   (condp = (type value)
+     PersistentVector
      (let [[^long a ^long b] value]
        (.set bitset a (inc b)))
+
+     LongRange
+     (doseq [pos value]
+       (.set bitset pos))
+
+     Integer
      (.set bitset value))
    bitset)
   ([^BitSet bitset] bitset))
